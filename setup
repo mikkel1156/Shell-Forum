@@ -1,0 +1,37 @@
+#!/bin/bash
+#   Check if script is being run as root.
+if [[ $EUID -ne 0 ]]; then
+    echo "This script needs to be run as root."
+    exit
+fi
+
+#   Compile the shell and server.
+gcc shell.c -o shell -lncurses
+gcc server.c -o server -lncurses
+
+#   Make ShellForum directory to hold the files.
+mkdir /etc/shellforum
+
+#   Move the shell and server to the ShellForum directory.
+mv shell /etc/shellforum/shell
+mv server /etc/shellforum/server
+
+#   Make ShellForum home directories.
+mkdir /home/ShellForum
+mkdir /home/ShellForum/Forum
+
+#   Setup ShellForum group and admin user.
+groupadd ShellForum
+read -sp "Set password for forum admin account: " PASS
+$PASS=$(openssl passwd -1 -salt ShellForum $PASS)
+useradd -G ShellForum -m -d /home/ShellForum/admin $PASS admin
+
+# Make simple MOTD file.
+echo "Welcome to the forum." >> /home/ShellForum/motd
+
+#   Set admin as owner and group as ShellForum for the ShellForum home directories and MOTD file.
+chown -R admin:ShellForum /home/ShellForum
+chown -R admin:ShellForum /home/ShellForum/motd
+
+#   Move the ShellForum service that runs the server in the background.
+mv ShellForum.service /lib/systemd/system/ShellForum.service

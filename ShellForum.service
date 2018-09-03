@@ -1,0 +1,14 @@
+[Unit]
+Description=ShellForum server service.
+After=ssh.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=admin
+ExecStart=/etc/shellforum/server
+
+[Install]
+WantedBy=multi-user.target
