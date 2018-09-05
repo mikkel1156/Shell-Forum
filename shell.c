@@ -103,7 +103,7 @@ int shell_help(char **args) {
 
     int i;
     for (i = 0; i < arrlen(built_in_str); i++) {
-        printw("  %s\n", built_in_str[i]);
+        printw("   %s\n", built_in_str[i]);
     }
 
     printw("Use the man command for information on other programs.\n\n");
@@ -111,7 +111,7 @@ int shell_help(char **args) {
     printw("These are the commands you are allowed to use:\n");
 
     for (i = 0; i < arrlen(allowed_cmds); i++) {
-        printw("  %s\n", allowed_cmds[i]);
+        printw("   %s\n", allowed_cmds[i]);
     }
     return 1;
 }
@@ -310,7 +310,6 @@ int shell_launch(char **args) {
                 }
             }
         }
-        printw("You aren't allowed to do that.\n");
         exit(EXIT_FAILURE);
     } else if (pid < 0) {
         //  Error forking
@@ -513,9 +512,11 @@ void lineClearTo(int start, int end) {
     @return The line from stdin.
 */
 char *shell_read_line(int lenPrompt) {
+    int ch;
+
     int bufsize = SHELL_RL_BUFSIZE;
     int position = 0;
-    int ch;
+    int lenBuffer = 0;
     char *buffer = malloc(sizeof(char) * bufsize);
     if (!buffer) {
         fprintf(stderr, "shell: allocation error\n");
@@ -546,11 +547,11 @@ char *shell_read_line(int lenPrompt) {
         fclose(hFp);
     }
 
-    while (ch = getch()) {
+    while ((ch = getch()) && ch != 'Q') {
         int x, y;
         int hidePress = 0;
 
-        //  Check for special characters.
+        //  Special keys for navigation on the line.
         if (ch == KEY_UP) {
             getyx(stdscr, y, x);
 
@@ -582,45 +583,110 @@ char *shell_read_line(int lenPrompt) {
             if (x != lenPrompt) {
                 move(y, x-1);
                 refresh();
+                position--;
             }
             hidePress = 1;
         } else if (ch == KEY_RIGHT) {
             getyx(stdscr, y, x);
-            if (x != strlen(buffer)) {
+            if (x != lenPrompt+lenBuffer) {
                 move(y, x+1);
                 refresh();
+                position++;
             }
             hidePress = 1;
-        } else if (ch == KEY_BACKSPACE) {
+        }  else if (ch == KEY_HOME) {
             getyx(stdscr, y, x);
             if (x != lenPrompt) {
-                mvdelch(y, x-1);
-                buffer[position-1] = 0;
-                position--;
+                move(y, lenPrompt);
+                position = 0;
+            }
+            hidePress = 1;
+        } else if (ch == KEY_END) {
+            getyx(stdscr, y, x);
+            if (x != lenPrompt+lenBuffer) {
+                move(y, lenPrompt+lenBuffer);
+                position = lenBuffer;
             }
             hidePress = 1;
         }
 
+        //  Special keys for editing the line.
+        if (ch == KEY_BACKSPACE) {
+            getyx(stdscr, y, x);
+            if (x != lenPrompt) {
+                mvdelch(y, x-1);
+
+                position--;
+                buffer[position] = 0;
+            }
+            hidePress = 1;
+        } else if (ch == KEY_DC) {
+            getyx(stdscr, y, x);
+            if (x != lenBuffer) {
+                mvdelch(y, x);
+
+                position--;
+                buffer[position] = 0;
+            }
+            hidePress = 1;
+        }
+
+
         if (ch == EOF) {
             exit(EXIT_SUCCESS);
         } else if (ch == '\n') {
-            buffer[position] = '\0';
+            buffer[lenBuffer] = '\0';
 
             //  Go to a new line after user input.
             printw("\n");
             refresh();
+
+            //  Return what was typed.
             return buffer;
         } else {
             if (!hidePress) {
-                buffer[position] = ch;
-                position++;
-                printw("%c", ch);
+                if (position == lenBuffer) {
+                    buffer[position] = ch;
+                    printw("%c", ch);
+                    position++;
+                    lenBuffer++;
+                } else {
+                    char *temp = malloc((lenBuffer) + 3);
+                    memset(temp, '\0', sizeof(temp));
+
+                    getyx(stdscr, y, x);
+                    lineClearTo(x-position-1, x);
+
+                    position++;
+                    lenBuffer++;
+
+                    strcpy(&temp[0], buffer);
+                    temp[position-1] = ch;
+
+                    for(int i = position-1; i < lenBuffer-1; i++) {
+                        temp[i+1] = buffer[i];
+                    }
+                    temp = realloc(temp, strlen(temp));
+                    //temp[strlen(temp)+1] = '\0';
+                    //printw("\n|%s(%i)|\n", temp, strlen(temp));
+
+                    for (int i = lenBuffer; i < strlen(temp); i++) {
+                        //printw("\n|%c\n", temp[i]);
+                        temp[i] = 0;
+                    }
+                    //temp[lenBuffer+2] = '\0';
+
+                    printw("%s", temp);
+                    move(y, x+1);
+
+                    buffer = temp;
+                }
                 refresh();
             }
         }
 
         //  If we have exceeded the buffer, reallocate.
-        if (position >= bufsize) {
+        if (lenBuffer >= bufsize) {
             bufsize += SHELL_RL_BUFSIZE;
             buffer = realloc(buffer, bufsize);
             if (!buffer) {
@@ -685,6 +751,7 @@ void shell_save_command(char *cmd) {
     free(path);
 }
 
+//  NOTE: Likely removal if no other use for it.
 int str_starts_with(const char *restrict string, const char *restrict prefix) {
     while(*prefix) {
         if(*prefix++ != *string++)
@@ -704,7 +771,7 @@ char *str_replace(char *str, char *orig, char *rep, int start) {
     if(!(p = strstr(temp, orig)))   //  Is 'orig' even in 'temp'?
         return temp;
 
-    strncpy(buffer, temp, p-temp);  //  Copy characters from 'temp' start to 'orig' str
+    strncpy(buffer, temp, p-temp);  //  Copy characters from 'temp' start to 'orig' str.
     buffer[p-temp] = '\0';
 
     sprintf(buffer + (p - temp), "%s%s", rep, p + strlen(orig));
@@ -713,15 +780,42 @@ char *str_replace(char *str, char *orig, char *rep, int start) {
     return str;
 }
 
-void shell_get_cwd(char *cwdp) {
+int num_of_char(char *str, char ch) {
+    int counter = 0;
+    for (int i = 0; i < strlen(str); i++) {
+        if (str[i] == ch)
+            counter++;
+    }
+
+    return counter;
+}
+
+void shell_get_cwd(char *pCWD) {
     char cwd[1024];
     if (getcwd(cwd, sizeof(cwd)) == NULL)
-	   perror("shell: getcwd() error");
+        perror("shell: getcwd() error");
 
-    if (str_starts_with(cwd, getenv("HOME"))) {
-        strncpy(cwdp, str_replace(cwd, getenv("HOME"), "~", 0), 1024);
+    int slashCount = num_of_char(getenv("HOME"), '/');
+    char *temp = malloc(strlen(cwd)+1);
+    strncpy(temp, cwd, strlen(cwd));
+
+    char *dirUser = strtok(temp, "/");
+
+    for (int i = 0; i < slashCount-1; i++) {
+        if (dirUser != NULL)
+            dirUser = strtok(NULL, "/");
+    }
+
+    int isUsersDir = 0;
+    if (dirUser != NULL && strlen(dirUser) == strlen(getenv("USER"))) {
+        if (strncmp(dirUser, getenv("USER"), strlen(dirUser)))
+            isUsersDir = 1;
+    }
+
+    if (isUsersDir) {
+        strncpy(pCWD, str_replace(cwd, getenv("HOME"), "~", 0), 1024);
     } else {
-        strncpy(cwdp, cwd, 1024);
+        strncpy(pCWD, cwd, 1024);
     }
 }
 
@@ -775,6 +869,10 @@ void shell_loop(void) {
         int lenPrompt = strlen(getenv("USER")) + strlen(cwd) + 3;
 
         line = shell_read_line(lenPrompt);
+
+        printw("LINE: %s\n", line);
+        refresh();
+
         args = shell_split_line(line);
         status = shell_execute(args);
 
