@@ -298,6 +298,8 @@ int shell_launch(char **args) {
     pid_t pid;
     int status;
 
+    reset_shell_mode();
+
     pid = fork();
     if (pid == 0) {
         //  Child process.
@@ -320,6 +322,8 @@ int shell_launch(char **args) {
             waitpid(pid, &status, WUNTRACED);
         } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
+
+    raw();
     return 1;
 }
 
