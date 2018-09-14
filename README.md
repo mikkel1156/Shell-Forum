@@ -29,4 +29,4 @@ Then all that needs to be done is run the `setup` script which will compile the 
 I have lots of things to do in my lists of what to do and fix, here are the major ones:
 * Add `view` command that will display formatted posts in markdown format and show comments at the end.
 * Add `comment` command to respond to a post, comments will be in a directory named like so `.comments-<post_name>`
-* __To-Fix:__ Output from running a non-built-in program makes indent before prompt.
+* ~~__To-Fix:__ Output from running a non-built-in program makes indent before prompt.~~

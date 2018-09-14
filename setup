@@ -24,7 +24,7 @@ mkdir /home/ShellForum/Forum
 groupadd ShellForum
 read -sp "Set password for forum admin account: " PASS
 $PASS=$(openssl passwd -1 -salt ShellForum $PASS)
-useradd -G ShellForum -m -d /home/ShellForum/admin $PASS admin
+useradd -G ShellForum -s /bin/bash -m -d /home/ShellForum/admin -p $PASS admin
 
 # Make simple MOTD file.
 echo "Welcome to the forum." >> /home/ShellForum/motd

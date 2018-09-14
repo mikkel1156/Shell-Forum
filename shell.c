@@ -30,6 +30,8 @@ int shell_commit(char **args);
 //  Declare other functions.
 void server_send_data(char *data);
 int num_of_files(const char* path);
+int num_of_char(char *str, char ch);
+char *str_replace(char *str, char *orig, char *rep, int start);
 int read_directory(char **files, const char* directory, int *iterator);
 
 
@@ -82,7 +84,7 @@ char *allowed_cmds[] = {
 */
 int shell_cd(char **args) {
     if (args[1] == NULL) {
-        fprintf(stderr, "shell: expected argument to \"cd\"\n");
+        fprintf(stderr, "shell: Expected at least one argument\n");
     } else {
         if (chdir(args[1]) != 0) {
             perror("shell");
@@ -103,7 +105,7 @@ int shell_help(char **args) {
 
     int i;
     for (i = 0; i < arrlen(built_in_str); i++) {
-        printw("   %s\n", built_in_str[i]);
+        printw(" - %s\n", built_in_str[i]);
     }
 
     printw("Use the man command for information on other programs.\n\n");
@@ -111,7 +113,7 @@ int shell_help(char **args) {
     printw("These are the commands you are allowed to use:\n");
 
     for (i = 0; i < arrlen(allowed_cmds); i++) {
-        printw("   %s\n", allowed_cmds[i]);
+        printw(" - %s\n", allowed_cmds[i]);
     }
     return 1;
 }
@@ -141,33 +143,66 @@ int shell_exit(char **args) {
     return 0;
 }
 
-void shell_search_menu(char **posts) {
-    //  Clear screen before making the menu.
+void shell_search_menu(char **directories, char **names, int postCount) {
+    //  Clear screen before making the menu and set shell mode to RAW.
     clear();
+    raw();
 
     int yMax, xMax;
     getmaxyx(stdscr, yMax, xMax);
 
-    WINDOW * menuWin = newwin(yMax-5, xMax-12, yMax-(yMax%100*0.9415), 5);
+    WINDOW * menuWin = newwin(yMax-5, xMax-12, yMax-(yMax*0.9415), 5);
     box(menuWin, 0, 0);
     refresh();
     wrefresh(menuWin);
 
+    curs_set(0);
     keypad(menuWin, true);
 
-    server_send_data(posts[0]);
+    mvprintw(yMax-(yMax%100*0.9415), (xMax*0.5215)-9, "-Results-");
 
-    //const *choices[3] = {"Test 1", "Test 2", "Test 3"};
-    int choice;
     int ch;
-    while ((ch = getch()) != 'q') {
-        //  TODO: Print number of posts relating to the height of the screen.
+    int choice;
+    int highlight = 0;
+    while (1) {
+        for (int i = 0; i < postCount; i++) {
+            if (i == highlight)
+                attron(A_REVERSE);
+            mvprintw(yMax-(yMax%100*0.9415)+2+i, 8, names[i]);
+            attroff(A_REVERSE);
+        }
+        ch = getch();
+        if (ch == 'Q')
+            break;
+
+        if (ch == KEY_UP) {
+            if (highlight != 0)
+                highlight--;
+        } else if (ch == KEY_DOWN) {
+            if (highlight < postCount-1)
+                highlight++;
+        }
+
+        if (ch == '\n') {
+            mvprintw(0, 0, "Picked: %s\n", directories[highlight]);
+        }
 
     }
+
+    //  "Reset" the shell.
     clear();
+    curs_set(1);
+    delwin(menuWin);
+    reset_shell_mode();
 }
 
 int shell_search(char **args) {
+    //  Check if user typed something to search for.
+    if (!args[1]) {
+        printw("You need to type something to search for.\n");
+        return 1;
+    }
+
     //  Get all the files in the forum.
     char **allFiles = NULL;
     int fCount = num_of_files("/home/ShellForum/Forum");
@@ -177,19 +212,19 @@ int shell_search(char **args) {
     int rCount = 0;
     char **results = NULL;
 
+    printw("fCount: %i\n", fCount);
+    refresh();
+
+    //  Count how many matches we got.
     for (int i = 0; i < fCount; i++) {
-        int o = 0;
         char path[1024];
         strcpy(path, allFiles[i]);
 
-        for (int ii = 0; ii < strlen(allFiles[i]); ii++) {
-            if (allFiles[i][ii] == '/') {
-                o++;
-            }
-        }
+        //  Number of times a forward slash occurs in the path.
+        int slashCount = num_of_char(path, '/');
 
-        char *token = strtok(allFiles[i], "/");
-        for (int ii = 0; ii < o-1; ii++) {
+        char *token = strtok(path, "/");
+        for (int ii = 0; ii < slashCount-1; ii++) {
             token = strtok(NULL, "/");
         }
 
@@ -202,19 +237,64 @@ int shell_search(char **args) {
             //  Check if there is a match.
             reti = regexec(&regex, token, 0, NULL, 0);
             if (!reti) {
-                //  Allocate memory enough for all the results.
-                results = malloc(rCount * sizeof(char*));
-
-                //  Copy the path over to the list of results.
-                results[rCount] = malloc((strlen(path)+1) * sizeof(char*));
-                strcpy(results[rCount], path);
                 rCount++;
             }
             ii++;
         }
     }
-    printw("%i\n", rCount);
-    shell_search_menu(allFiles);
+
+    char **resultPaths = NULL;
+
+    //  If any results were found, then store the results.
+    if (rCount > 0) {
+        int rI = 0;
+        //  Allocate memory for the results and their paths.
+        resultPaths = malloc(fCount * sizeof(char*));
+        results = malloc(rCount * sizeof(char*));
+
+        for (int i = 0; i < fCount; i++) {
+            char path[1024];
+            strcpy(path, allFiles[i]);
+
+            //  Number of times a forward slash occurs in the path.
+            int slashCount = num_of_char(path, '/');
+
+            char *token = strtok(path, "/");
+            for (int ii = 0; ii < slashCount-1; ii++) {
+                token = strtok(NULL, "/");
+            }
+
+            int ii = 1;
+            while (args[ii] != NULL) {
+                //  Compile regular expression.
+                regex_t regex;
+                int reti = regcomp(&regex, args[ii], 0);
+
+                //  Check if there is a match.
+                reti = regexec(&regex, token, 0, NULL, 0);
+                if (!reti) {
+                    //  Allocate more memory for result entry, copy the path over to the list of results.
+                    results[rI] = malloc((strlen(token)+1) * sizeof(char*));
+                    strcpy(results[rI], token);
+
+                    resultPaths[rI] = malloc((strlen(allFiles[i])+1) * sizeof(char*));
+                    strcpy(resultPaths[rI], allFiles[i]);
+                    rI++;
+                }
+                ii++;
+            }
+        }
+    }
+    free(allFiles);
+
+    if (rCount > 0) {
+        shell_search_menu(resultPaths, results, rCount);
+    } else {
+        printw("No results found.\n");
+    }
+
+    free(results);
+    free(resultPaths);
 
     return 1;
 }
@@ -232,7 +312,7 @@ int shell_commit(char **args) {
         attroff(A_ITALIC);
         printw(" to list all the forums.\n");
         return 1;
-    } else if (strcmp(args[1], "ls") != 0) {
+    } else if (strlen(args[1]) == 2 && strcmp(args[1], "ls")) {
         printw("No forum to commit to was chosen.\nUse ");
         attron(A_ITALIC);
         printw("commit ls");
@@ -241,6 +321,7 @@ int shell_commit(char **args) {
         return 1;
     } else if (!args[2]) {
         printw("No file was chosen to commit.\n");
+        return 1;
     }
 
     if (strcmp(args[1], "ls") == 0) {
@@ -298,8 +379,6 @@ int shell_launch(char **args) {
     pid_t pid;
     int status;
 
-    reset_shell_mode();
-
     pid = fork();
     if (pid == 0) {
         //  Child process.
@@ -322,8 +401,6 @@ int shell_launch(char **args) {
             waitpid(pid, &status, WUNTRACED);
         } while (!WIFEXITED(status) && !WIFSIGNALED(status));
     }
-
-    raw();
     return 1;
 }
 
@@ -415,7 +492,6 @@ void server_send_data(char *data) {
         bzero(buffer, sizeof(buffer));
     }
 
-    //printw("%s\n", buffer);
     close(sockfd);
 }
 
@@ -423,10 +499,11 @@ int num_of_files(const char* path) {
     DIR *dir;
     int counter = 0;
     struct dirent *de;
+    refresh();
 
     dir = opendir(path);
     if (dir == NULL) {
-		fprintf(stderr, "shell: could not open current directory\n");
+		fprintf(stderr, "shell: num_of_files() could not open current directory\n");
 		return -1;
 	}
 
@@ -436,15 +513,10 @@ int num_of_files(const char* path) {
 
         counter++;
         if (de->d_type == DT_DIR) {
-            char cwd[1024];
-            if (getcwd(cwd, sizeof(cwd)) == NULL) {
-                perror("shell: getcwd() error");
-                return -1;
-            }
             char *filename = de->d_name;
-            char *newDir = malloc(strlen(cwd) + strlen(filename) + 2);
+            char *newDir = malloc(strlen(path) + strlen(filename) + 2);
             if (newDir != NULL) {
-                strcpy(newDir, cwd);
+                strcpy(newDir, path);
                 strcat(newDir, "/");
                 strcat(newDir, filename);
             }
@@ -460,28 +532,23 @@ int num_of_files(const char* path) {
 int read_directory(char **files, const char* directory, int *iterator) {
     DIR *dir = opendir(directory);
 	if (dir == NULL) {
-		fprintf(stderr, "shell: could not open current directory\n");
+		fprintf(stderr, "shell: read_directory() could not open current directory\n");
 		return -1;
 	}
 
     int i = 0;
     if (iterator)
-        i = *iterator+1;
+        i = *iterator;
 
     struct dirent *de;
 	while ((de = readdir(dir)) != NULL) {
         if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
             continue;
 
-        char cwd[1024];
-        if (getcwd(cwd, sizeof(cwd)) == NULL) {
-            perror("shell: getcwd() error");
-            return -1;
-        }
         char *filename = de->d_name;
-        char *path = malloc(strlen(cwd) + strlen(filename) + 2);
+        char *path = malloc(strlen(directory) + strlen(filename) + 2);
         if (path != NULL) {
-            strcpy(path, cwd);
+            strcpy(path, directory);
             strcat(path, "/");
             strcat(path, filename);
         } else {
@@ -490,7 +557,10 @@ int read_directory(char **files, const char* directory, int *iterator) {
 
         files[i] = malloc((strlen(path)+1) * sizeof(char));
         strcpy(files[i], path);
+
         i++;
+        if (iterator)
+            (*iterator)++;
 
         if (de->d_type == DT_DIR) {
             read_directory(files, path, &i);
@@ -516,6 +586,8 @@ void lineClearTo(int start, int end) {
     @return The line from stdin.
 */
 char *shell_read_line(int lenPrompt) {
+    //  Set to RAW mode, used for special keys.
+    raw();
     int ch;
 
     int bufsize = SHELL_RL_BUFSIZE;
@@ -565,6 +637,7 @@ char *shell_read_line(int lenPrompt) {
                 }
                 printw(historyBuffer[hPosition]);
                 buffer = historyBuffer[hPosition];
+                lenBuffer = strlen(historyBuffer[hPosition]);
                 position = strlen(historyBuffer[hPosition]);
                 hPosition++;
             }
@@ -579,6 +652,7 @@ char *shell_read_line(int lenPrompt) {
                 hPosition -= 1;
                 printw(historyBuffer[hPosition]);
                 buffer = historyBuffer[hPosition];
+                lenBuffer = strlen(historyBuffer[hPosition]);
                 position = strlen(historyBuffer[hPosition]);
             }
             hidePress = 1;
@@ -621,7 +695,9 @@ char *shell_read_line(int lenPrompt) {
                 mvdelch(y, x-1);
 
                 position--;
+                lenBuffer--;
                 buffer[position] = 0;
+                strcpy(&buffer[position], &buffer[position+1]);
             }
             hidePress = 1;
         } else if (ch == KEY_DC) {
@@ -630,7 +706,9 @@ char *shell_read_line(int lenPrompt) {
                 mvdelch(y, x);
 
                 position--;
+                lenBuffer--;
                 buffer[position] = 0;
+                strcpy(&buffer[position], &buffer[position+1]);
             }
             hidePress = 1;
         }
@@ -644,6 +722,9 @@ char *shell_read_line(int lenPrompt) {
             //  Go to a new line after user input.
             printw("\n");
             refresh();
+
+            //  Reset the shell mode to exit RAW mode.
+            reset_shell_mode();
 
             //  Return what was typed.
             return buffer;
@@ -671,14 +752,10 @@ char *shell_read_line(int lenPrompt) {
                         temp[i+1] = buffer[i];
                     }
                     temp = realloc(temp, strlen(temp));
-                    //temp[strlen(temp)+1] = '\0';
-                    //printw("\n|%s(%i)|\n", temp, strlen(temp));
 
                     for (int i = lenBuffer; i < strlen(temp); i++) {
-                        //printw("\n|%c\n", temp[i]);
                         temp[i] = 0;
                     }
-                    //temp[lenBuffer+2] = '\0';
 
                     printw("%s", temp);
                     move(y, x+1);
@@ -853,7 +930,6 @@ void shell_loop(void) {
     int status;
     char cwd[1024];
 
-    //execvp("/usr/bin/clear", NULL);
     do {
         //  Get current working directory.
         shell_get_cwd(cwd);
@@ -873,8 +949,7 @@ void shell_loop(void) {
         int lenPrompt = strlen(getenv("USER")) + strlen(cwd) + 3;
 
         line = shell_read_line(lenPrompt);
-
-        printw("LINE: %s\n", line);
+        printw("Line: %s\n", line);
         refresh();
 
         args = shell_split_line(line);
@@ -898,7 +973,6 @@ int main(int argc, char **argv) {
     /*  Curses Initialisations  */
     initscr();
     start_color();
-    raw();
     keypad(stdscr, TRUE);
     noecho();
 

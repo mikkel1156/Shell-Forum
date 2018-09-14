@@ -16,7 +16,6 @@ int num_of_files(const char* path) {
     int counter = 0;
     struct dirent *de;
 
-    //chdir(path);
     dir = opendir(path);
     if (dir == NULL) {
         printf("%s:\n", path);
@@ -48,35 +47,39 @@ int num_of_files(const char* path) {
 int read_directory(char **files, const char* directory, int *iterator) {
     DIR *dir = opendir(directory);
 	if (dir == NULL) {
-        printf("%s:\n", directory);
-		fprintf(stderr, "server - read_directory: could not open directory\n");
+		fprintf(stderr, "shell: read_directory() could not open current directory\n");
 		return -1;
 	}
 
     int i = 0;
     if (iterator)
-        i = *iterator+1;
+        i = *iterator;
 
     struct dirent *de;
 	while ((de = readdir(dir)) != NULL) {
-        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0 || de->d_type != DT_DIR)
+        if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
             continue;
 
-        char *filepath = de->d_name;
-        char *path = malloc(strlen(directory) + strlen(filepath) + 2);
+        char *filename = de->d_name;
+        char *path = malloc(strlen(directory) + strlen(filename) + 2);
         if (path != NULL) {
             strcpy(path, directory);
             strcat(path, "/");
-            strcat(path, filepath);
+            strcat(path, filename);
         } else {
             continue;
         }
 
         files[i] = malloc((strlen(path)+1) * sizeof(char));
         strcpy(files[i], path);
-        i++;
 
-        read_directory(files, path, &i);
+        i++;
+        if (iterator)
+            (*iterator)++;
+
+        if (de->d_type == DT_DIR) {
+            read_directory(files, path, &i);
+        }
     }
 
     closedir(dir);
